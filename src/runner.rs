@@ -88,13 +88,36 @@ fn read_source(cli: &Cli) -> anyhow::Result<SourceBuffer> {
 }
 
 fn ensure_distinct_destinations(cli: &Cli) -> anyhow::Result<()> {
-    let (Some(comments), Some(output)) = (&cli.comments, &cli.output) else {
-        return Ok(());
-    };
-    if comparable_destination(comments)? == comparable_destination(output)? {
-        bail!("--comments and --output must refer to different files")
+    let mut paths = Vec::with_capacity(3);
+    if let Some(input) = cli.input.as_deref().filter(|path| *path != Path::new("-")) {
+        paths.push(("input", input));
+    }
+    if let Some(comments) = cli.comments.as_deref() {
+        paths.push(("--comments", comments));
+    }
+    if let Some(output) = cli.output.as_deref() {
+        paths.push(("--output", output));
+    }
+
+    for (index, (left_name, left_path)) in paths.iter().enumerate() {
+        for (right_name, right_path) in &paths[index + 1..] {
+            if paths_alias(left_path, right_path)? {
+                bail!("{left_name} and {right_name} must refer to different files")
+            }
+        }
     }
     Ok(())
+}
+
+fn paths_alias(left: &Path, right: &Path) -> anyhow::Result<bool> {
+    if comparable_destination(left)? == comparable_destination(right)? {
+        return Ok(true);
+    }
+    if left.exists() && right.exists() {
+        return same_file::is_same_file(left, right)
+            .with_context(|| format!("compare {} and {}", left.display(), right.display()));
+    }
+    Ok(false)
 }
 
 fn comparable_destination(path: &Path) -> anyhow::Result<PathBuf> {
@@ -105,17 +128,51 @@ fn comparable_destination(path: &Path) -> anyhow::Result<PathBuf> {
             .context("resolve current directory")?
             .join(path)
     };
-    let normalized = normalize_lexically(&absolute);
-    if normalized.exists() {
-        return fs::canonicalize(&normalized)
-            .with_context(|| format!("resolve destination {}", path.display()));
+    resolve_symlinks(&normalize_lexically(&absolute), path)
+}
+
+fn resolve_symlinks(absolute: &Path, original: &Path) -> anyhow::Result<PathBuf> {
+    let mut unresolved = absolute.to_owned();
+    for _ in 0..40 {
+        let mut resolved = PathBuf::new();
+        let components = unresolved.components().collect::<Vec<_>>();
+        let mut followed = false;
+
+        for (index, component) in components.iter().enumerate() {
+            resolved.push(component.as_os_str());
+            match fs::symlink_metadata(&resolved) {
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    let target = fs::read_link(&resolved)
+                        .with_context(|| format!("resolve destination {}", original.display()))?;
+                    let parent = resolved.parent().unwrap_or_else(|| Path::new("/"));
+                    let mut next = if target.is_absolute() {
+                        target
+                    } else {
+                        parent.join(target)
+                    };
+                    for remaining in &components[index + 1..] {
+                        next.push(remaining.as_os_str());
+                    }
+                    unresolved = normalize_lexically(&next);
+                    followed = true;
+                    break;
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(error)
+                        .with_context(|| format!("resolve destination {}", original.display()));
+                }
+            }
+        }
+        if !followed {
+            return Ok(normalize_lexically(&resolved));
+        }
     }
-    let parent = normalized.parent().unwrap_or_else(|| Path::new("/"));
-    let file_name = normalized
-        .file_name()
-        .context("destination must name a file")?;
-    let resolved_parent = fs::canonicalize(parent).unwrap_or_else(|_| parent.to_owned());
-    Ok(resolved_parent.join(file_name))
+    bail!(
+        "too many symbolic links while resolving {}",
+        original.display()
+    )
 }
 
 fn normalize_lexically(path: &Path) -> PathBuf {
@@ -426,5 +483,60 @@ mod tests {
         ])
         .unwrap();
         assert!(ensure_distinct_destinations(&distinct).is_ok());
+    }
+
+    #[test]
+    fn rejects_output_that_aliases_the_input() {
+        let directory = tempdir().unwrap();
+        let input = directory.path().join("input.txt");
+        std::fs::write(&input, "hello").unwrap();
+        let cli = Cli::try_parse_from([
+            "annotui".into(),
+            input.clone().into_os_string(),
+            "--output".into(),
+            input.into_os_string(),
+        ])
+        .unwrap();
+        let error = ensure_distinct_destinations(&cli).unwrap_err().to_string();
+        assert!(error.contains("input and --output"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_dangling_symlink_that_would_alias_another_destination() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempdir().unwrap();
+        let comments = directory.path().join("review.json");
+        let output = directory.path().join("output-link");
+        symlink(&comments, &output).unwrap();
+        let cli = Cli::try_parse_from([
+            "annotui".into(),
+            "--buffer".into(),
+            "hello".into(),
+            "--comments".into(),
+            comments.into_os_string(),
+            "--output".into(),
+            output.into_os_string(),
+        ])
+        .unwrap();
+        assert!(ensure_distinct_destinations(&cli).is_err());
+    }
+
+    #[test]
+    fn rejects_hard_linked_input_and_output() {
+        let directory = tempdir().unwrap();
+        let input = directory.path().join("input.txt");
+        let output = directory.path().join("output.txt");
+        std::fs::write(&input, "hello").unwrap();
+        std::fs::hard_link(&input, &output).unwrap();
+        let cli = Cli::try_parse_from([
+            "annotui".into(),
+            input.into_os_string(),
+            "--output".into(),
+            output.into_os_string(),
+        ])
+        .unwrap();
+        assert!(ensure_distinct_destinations(&cli).is_err());
     }
 }

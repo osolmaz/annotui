@@ -192,7 +192,7 @@ impl App {
             return false;
         };
         let body = editor.body();
-        if body.is_empty() {
+        if body.trim().is_empty() {
             self.status = Some("Comment cannot be empty".into());
             return false;
         }
@@ -346,6 +346,17 @@ mod tests {
         app.open_selected_editor();
         assert!(!app.submit_editor());
         assert!(app.editor.is_some());
+        assert_eq!(app.status.as_deref(), Some("Comment cannot be empty"));
+    }
+
+    #[test]
+    fn whitespace_only_comment_stays_open() {
+        let mut app = app();
+        app.open_selected_editor();
+        app.editor.as_mut().unwrap().textarea.insert_str("  \n\t");
+        assert!(!app.submit_editor());
+        assert!(app.editor.is_some());
+        assert!(app.review.comments.is_empty());
         assert_eq!(app.status.as_deref(), Some("Comment cannot be empty"));
     }
 
