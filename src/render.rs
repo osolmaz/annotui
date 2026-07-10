@@ -239,6 +239,28 @@ fn update_scroll(app: &mut App, rows: &[DocumentRow], viewport_height: usize) {
             )
         })
         .unwrap_or(0);
+    let focused_comment_row = app.active_comment_id.and_then(|id| {
+        rows.iter().position(|row| {
+            matches!(
+                row,
+                DocumentRow::Comment {
+                    id: row_id,
+                    first: true,
+                    ..
+                } if *row_id == id
+            )
+        })
+    });
+    if let Some(focus_row) = focused_comment_row {
+        if focus_row < app.scroll_row {
+            app.scroll_row = focus_row;
+        } else if focus_row >= app.scroll_row.saturating_add(viewport_height) {
+            app.scroll_row = focus_row.saturating_add(1).saturating_sub(viewport_height);
+        }
+        app.scroll_row = app.scroll_row.min(maximum);
+        app.follow_cursor = false;
+        return;
+    }
     let target_row = if app.editor.is_some() {
         rows.iter()
             .enumerate()
@@ -278,7 +300,8 @@ fn render_source_row(
     let selected = app
         .selection
         .is_some_and(|selection| selection.contains(line_number));
-    let cursor = app.cursor_line == line_number && app.editor.is_none();
+    let cursor =
+        app.cursor_line == line_number && app.editor.is_none() && app.active_comment_id.is_none();
     let marker = if cursor { "▶" } else { " " };
     let number = format!("{marker}{line_number:>line_digits$} ");
     let text = horizontally_scrolled(
@@ -326,7 +349,8 @@ fn render_comment_row(
     active: bool,
 ) {
     let prefix = if first {
-        format!("{}└─ ", " ".repeat(line_digits + 2))
+        let marker = if active { "▶─ " } else { "└─ " };
+        format!("{}{marker}", " ".repeat(line_digits + 2))
     } else {
         " ".repeat(line_digits + 5)
     };
@@ -487,6 +511,15 @@ mod tests {
         assert!(rendered.contains("└─ first line"));
         assert!(hits.iter().any(|hit| hit.target == HitTarget::Comment(1)));
 
+        app.move_to_line(2);
+        app.move_browse_focus(1);
+        terminal
+            .draw(|frame| hits = render_app(frame, &mut app))
+            .unwrap();
+        let rendered = terminal.backend().to_string();
+        assert!(rendered.contains("▶─ first line"));
+        assert!(!rendered.contains("▶2 ┃ two"));
+
         app.begin_edit(1);
         terminal
             .draw(|frame| hits = render_app(frame, &mut app))
@@ -501,7 +534,7 @@ mod tests {
         terminal
             .draw(|frame| drop(render_app(frame, &mut app)))
             .unwrap();
-        assert!(terminal.backend().to_string().contains("└─     code"));
+        assert!(terminal.backend().to_string().contains("▶─     code"));
     }
 
     #[test]
@@ -524,6 +557,51 @@ mod tests {
         assert_eq!(horizontally_scrolled("abcdef", 3), "def");
         assert_eq!(horizontally_scrolled("界abc", 2), "abc");
         assert_eq!(horizontally_scrolled("e\u{301}abc", 1), "abc");
+    }
+
+    #[test]
+    fn keyboard_focused_comment_is_scrolled_into_view() {
+        let text = (1..=30)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let source = SourceBuffer::from_bytes("long", text.as_bytes()).unwrap();
+        let mut review = ReviewDocument::empty(source.source_ref());
+        review.upsert_comment(crate::domain::Comment {
+            id: 1,
+            start_line: 20,
+            end_line: 20,
+            body: "focused comment".into(),
+        });
+        let mut app = App::new(source, review);
+        app.jump_comment(true);
+        let backend = TestBackend::new(40, 8);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| drop(render_app(frame, &mut app)))
+            .unwrap();
+
+        let focused_row = document_rows(&app)
+            .iter()
+            .position(|row| {
+                matches!(
+                    row,
+                    DocumentRow::Comment {
+                        id: 1,
+                        first: true,
+                        ..
+                    }
+                )
+            })
+            .unwrap();
+        let content_height = 6;
+        assert!(focused_row >= app.scroll_row);
+        assert!(focused_row < app.scroll_row + content_height);
+        assert!(terminal
+            .backend()
+            .to_string()
+            .contains("▶─ focused comment"));
     }
 
     #[test]

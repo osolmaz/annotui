@@ -323,8 +323,8 @@ fn handle_browse_key(key: KeyEvent, app: &mut App) {
         KeyCode::Up if key.modifiers.contains(KeyModifiers::SHIFT) => {
             app.extend_shift_selection(-1);
         }
-        KeyCode::Down | KeyCode::Char('j') => app.move_cursor(1),
-        KeyCode::Up | KeyCode::Char('k') => app.move_cursor(-1),
+        KeyCode::Down | KeyCode::Char('j') => app.move_browse_focus(1),
+        KeyCode::Up | KeyCode::Char('k') => app.move_browse_focus(-1),
         KeyCode::PageDown => app.move_cursor(10),
         KeyCode::PageUp => app.move_cursor(-10),
         KeyCode::Char('g') => app.move_to_line(1),
@@ -336,7 +336,7 @@ fn handle_browse_key(key: KeyEvent, app: &mut App) {
                 app.begin_selection(app.cursor_line);
             }
         }
-        KeyCode::Enter => app.open_selected_editor(),
+        KeyCode::Enter => app.open_focused_editor(),
         KeyCode::Esc => app.cancel_selection(),
         KeyCode::Char('e') => {
             app.edit_comment_at_cursor();
@@ -547,6 +547,30 @@ mod tests {
         );
 
         assert_eq!(app.review.comments.len(), 1);
+    }
+
+    #[test]
+    fn arrows_and_enter_open_an_existing_comment_for_keyboard_editing() {
+        let mut app = app();
+        app.review.upsert_comment(crate::domain::Comment {
+            id: 1,
+            start_line: 1,
+            end_line: 1,
+            body: "original".into(),
+        });
+
+        handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), &mut app);
+        assert_eq!(app.active_comment_id, Some(1));
+        handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &mut app);
+        assert_eq!(app.editor.as_ref().unwrap().comment_id, Some(1));
+        handle_key(
+            KeyEvent::new(KeyCode::Char('!'), KeyModifiers::NONE),
+            &mut app,
+        );
+        handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &mut app);
+
+        assert_eq!(app.review.comments[0].body, "original!");
+        assert_eq!(app.active_comment_id, Some(1));
     }
 
     #[test]

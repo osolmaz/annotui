@@ -12,8 +12,8 @@ second line"
 ```
 
 Drag across source lines and release to open the inline comment editor. Enter saves
-the comment. Existing comments remain visible below their ranges and can be clicked
-to edit them.
+the comment. Existing comments remain visible below their ranges; reach them with
+Up/Down and press Enter, or click one, to edit it.
 
 ## Install
 
@@ -73,13 +73,13 @@ Keyboard controls:
 
 | Key | Action |
 | --- | --- |
-| `j` / `k`, arrows | Move between source lines |
+| `j` / `k`, Up/Down | Move between source lines and inline comments |
 | `Shift-Up` / `Shift-Down` | Select a range; release Shift to write the comment |
 | `v` | Start or cancel range selection |
-| `Enter` | Comment on the cursor/range, or save an active comment |
+| `Enter` | Comment on a source range, edit a focused comment, or save the editor |
 | `Ctrl-O` | Insert a newline in a comment |
 | `Esc` | Cancel selection or editing |
-| `e` / `d` | Edit or delete a comment on the cursor line |
+| `e` / `d` | Edit or delete a focused comment or one on the cursor line |
 | `[` / `]` | Jump to the previous/next comment |
 | `h` / `l` | Scroll long source lines horizontally |
 | `q` | Write output and quit |
