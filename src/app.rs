@@ -72,6 +72,7 @@ pub struct App {
     pub horizontal_scroll: usize,
     pub should_quit: bool,
     pub follow_cursor: bool,
+    pub mouse_drag_anchor: Option<usize>,
     pub status: Option<String>,
     pub dirty: bool,
 }
@@ -90,6 +91,7 @@ impl App {
             horizontal_scroll: 0,
             should_quit: false,
             follow_cursor: true,
+            mouse_drag_anchor: None,
             status: None,
             dirty: false,
         }

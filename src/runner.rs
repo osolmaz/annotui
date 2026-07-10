@@ -256,24 +256,34 @@ fn handle_mouse(mouse: MouseEvent, app: &mut App, hit_areas: &[HitArea]) {
     let target = hit_test(hit_areas, mouse.column, mouse.row);
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => match target {
-            Some(HitTarget::SourceLine(line)) if app.editor.is_none() => app.begin_selection(line),
+            Some(HitTarget::SourceLine(line)) if app.editor.is_none() => {
+                app.begin_selection(line);
+                app.mouse_drag_anchor = Some(line);
+            }
             Some(HitTarget::Comment(id)) if app.editor.is_none() => {
+                app.mouse_drag_anchor = None;
                 app.begin_edit(id);
             }
-            _ => {}
+            _ => app.mouse_drag_anchor = None,
         },
         MouseEventKind::Drag(MouseButton::Left) => {
-            if let Some(HitTarget::SourceLine(line)) = target {
-                app.extend_selection(line);
+            if app.mouse_drag_anchor.is_some() {
+                if let Some(HitTarget::SourceLine(line)) = target {
+                    app.extend_selection(line);
+                }
             }
         }
-        MouseEventKind::Up(_) => {
-            if app.editor.is_none() && app.selection.is_some() {
+        MouseEventKind::Up(MouseButton::Left) => {
+            let active = app.mouse_drag_anchor.take().is_some();
+            if active && app.editor.is_none() && app.selection.is_some() {
                 if let Some(HitTarget::SourceLine(line)) = target {
                     app.extend_selection(line);
                 }
                 app.open_selected_editor();
             }
+        }
+        MouseEventKind::Up(_) => {
+            app.mouse_drag_anchor = None;
         }
         MouseEventKind::ScrollDown => {
             if let Some(editor) = app.editor.as_mut() {
@@ -297,7 +307,8 @@ fn handle_mouse(mouse: MouseEvent, app: &mut App, hit_areas: &[HitArea]) {
         MouseEventKind::ScrollRight => {
             app.horizontal_scroll = app.horizontal_scroll.saturating_add(4);
         }
-        MouseEventKind::Moved | MouseEventKind::Down(_) | MouseEventKind::Drag(_) => {}
+        MouseEventKind::Down(_) => app.mouse_drag_anchor = None,
+        MouseEventKind::Moved | MouseEventKind::Drag(_) => {}
     }
 }
 
@@ -369,6 +380,51 @@ mod tests {
         }
         let editor = app.editor.unwrap();
         assert_eq!((editor.start_line, editor.end_line), (1, 2));
+    }
+
+    #[test]
+    fn unrelated_mouse_releases_do_not_open_a_keyboard_selection() {
+        let mut app = app();
+        app.begin_selection(1);
+        let hits = [HitArea::new(
+            Rect::new(0, 1, 80, 1),
+            HitTarget::SourceLine(1),
+        )];
+
+        handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Up(MouseButton::Right),
+                column: 5,
+                row: 1,
+                modifiers: KeyModifiers::NONE,
+            },
+            &mut app,
+            &hits,
+        );
+        assert!(app.editor.is_none());
+
+        handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 5,
+                row: 0,
+                modifiers: KeyModifiers::NONE,
+            },
+            &mut app,
+            &hits,
+        );
+        handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Up(MouseButton::Left),
+                column: 5,
+                row: 1,
+                modifiers: KeyModifiers::NONE,
+            },
+            &mut app,
+            &hits,
+        );
+        assert!(app.editor.is_none());
+        assert!(app.selection.is_some());
     }
 
     #[test]

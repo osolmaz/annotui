@@ -7,6 +7,8 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use crate::{
     app::App,
@@ -15,6 +17,7 @@ use crate::{
 
 const EDITOR_HEIGHT: usize = 5;
 const MINIMUM_HEIGHT: u16 = 7;
+const TAB_STOP: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DocumentRow {
@@ -257,16 +260,34 @@ fn extend_editor_rect(editor_rect: &mut Option<Rect>, row: Rect) {
 }
 
 fn horizontally_scrolled(text: &str, columns: usize) -> String {
+    let expanded = expand_tabs(text);
     let mut skipped = 0;
-    text.chars()
-        .skip_while(|character| {
+    expanded
+        .graphemes(true)
+        .skip_while(|grapheme| {
             if skipped >= columns {
                 return false;
             }
-            skipped += unicode_width::UnicodeWidthChar::width(*character).unwrap_or(0);
+            skipped += grapheme.width();
             true
         })
         .collect()
+}
+
+fn expand_tabs(text: &str) -> String {
+    let mut expanded = String::with_capacity(text.len());
+    let mut column = 0;
+    for grapheme in text.graphemes(true) {
+        if grapheme == "\t" {
+            let spaces = TAB_STOP - column % TAB_STOP;
+            expanded.extend(std::iter::repeat_n(' ', spaces));
+            column += spaces;
+        } else {
+            expanded.push_str(grapheme);
+            column += grapheme.width();
+        }
+    }
+    expanded
 }
 
 fn render_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
@@ -395,5 +416,14 @@ mod tests {
         assert!(app.scroll_row > 0);
         assert_eq!(horizontally_scrolled("abcdef", 3), "def");
         assert_eq!(horizontally_scrolled("界abc", 2), "abc");
+        assert_eq!(horizontally_scrolled("e\u{301}abc", 1), "abc");
+    }
+
+    #[test]
+    fn tabs_expand_to_four_column_stops_before_scrolling() {
+        assert_eq!(expand_tabs("\talpha"), "    alpha");
+        assert_eq!(expand_tabs("a\tb"), "a   b");
+        assert_eq!(expand_tabs("界\tb"), "界  b");
+        assert_eq!(horizontally_scrolled("a\tb", 4), "b");
     }
 }
