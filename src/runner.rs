@@ -1,8 +1,7 @@
 use std::{
     fs,
     io::{self, IsTerminal, Read, Write},
-    path::Path,
-    time::Duration,
+    path::{Component, Path, PathBuf},
 };
 
 use anyhow::{bail, Context};
@@ -30,6 +29,7 @@ use crate::{
 ///
 /// Returns an error for invalid input, terminal failures, invalid sidecars, or output failures.
 pub fn run(cli: &Cli) -> anyhow::Result<()> {
+    ensure_distinct_destinations(cli)?;
     let source = read_source(cli)?;
     let review = read_review(cli, &source)?;
     let mut app = App::new(source, review);
@@ -39,9 +39,7 @@ pub fn run(cli: &Cli) -> anyhow::Result<()> {
         let mut hit_areas = Vec::new();
         while !app.should_quit {
             terminal.draw(|frame| hit_areas = render_app(frame, &mut app))?;
-            if event::poll(Duration::from_millis(250))? {
-                handle_event(event::read()?, &mut app, &hit_areas);
-            }
+            handle_event(event::read()?, &mut app, &hit_areas);
         }
     }
 
@@ -83,7 +81,57 @@ fn read_source(cli: &Cli) -> anyhow::Result<SourceBuffer> {
         bail!("provide a file, pipe standard input, or pass --buffer")
     };
 
+    if name.trim().is_empty() {
+        bail!("source name must not be empty")
+    }
     SourceBuffer::from_bytes(name, &bytes).context("input must be valid UTF-8")
+}
+
+fn ensure_distinct_destinations(cli: &Cli) -> anyhow::Result<()> {
+    let (Some(comments), Some(output)) = (&cli.comments, &cli.output) else {
+        return Ok(());
+    };
+    if comparable_destination(comments)? == comparable_destination(output)? {
+        bail!("--comments and --output must refer to different files")
+    }
+    Ok(())
+}
+
+fn comparable_destination(path: &Path) -> anyhow::Result<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        std::env::current_dir()
+            .context("resolve current directory")?
+            .join(path)
+    };
+    let normalized = normalize_lexically(&absolute);
+    if normalized.exists() {
+        return fs::canonicalize(&normalized)
+            .with_context(|| format!("resolve destination {}", path.display()));
+    }
+    let parent = normalized.parent().unwrap_or_else(|| Path::new("/"));
+    let file_name = normalized
+        .file_name()
+        .context("destination must name a file")?;
+    let resolved_parent = fs::canonicalize(parent).unwrap_or_else(|_| parent.to_owned());
+    Ok(resolved_parent.join(file_name))
+}
+
+fn normalize_lexically(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::RootDir | Component::Prefix(_) | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+    normalized
 }
 
 fn read_stdin() -> anyhow::Result<Vec<u8>> {
@@ -269,8 +317,10 @@ fn handle_mouse(mouse: MouseEvent, app: &mut App, hit_areas: &[HitArea]) {
 
 #[cfg(test)]
 mod tests {
+    use clap::Parser;
     use crossterm::event::{KeyEvent, MouseEvent};
     use ratatui::layout::Rect;
+    use tempfile::tempdir;
 
     use crate::{domain::ReviewDocument, source::SourceBuffer};
 
@@ -333,5 +383,48 @@ mod tests {
         }
         let editor = app.editor.unwrap();
         assert_eq!((editor.start_line, editor.end_line), (1, 2));
+    }
+
+    #[test]
+    fn rejects_empty_source_names_before_entering_the_tui() {
+        let cli =
+            Cli::try_parse_from(["annotui", "--buffer", "hello", "--source-name", "   "]).unwrap();
+        assert!(read_source(&cli)
+            .unwrap_err()
+            .to_string()
+            .contains("source name must not be empty"));
+    }
+
+    #[test]
+    fn rejects_lexically_equivalent_sidecar_and_output_paths() {
+        let directory = tempdir().unwrap();
+        let comments = directory.path().join("review.json");
+        let output = directory.path().join("nested/../review.json");
+        let cli = Cli::try_parse_from([
+            "annotui".into(),
+            "--buffer".into(),
+            "hello".into(),
+            "--comments".into(),
+            comments.into_os_string(),
+            "--output".into(),
+            output.into_os_string(),
+        ])
+        .unwrap();
+        assert!(ensure_distinct_destinations(&cli)
+            .unwrap_err()
+            .to_string()
+            .contains("different files"));
+
+        let distinct = Cli::try_parse_from([
+            "annotui",
+            "--buffer",
+            "hello",
+            "--comments",
+            "comments.json",
+            "--output",
+            "output.md",
+        ])
+        .unwrap();
+        assert!(ensure_distinct_destinations(&distinct).is_ok());
     }
 }

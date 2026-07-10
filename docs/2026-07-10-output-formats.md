@@ -71,7 +71,8 @@ Field rules:
 - `source.sha256` is the lowercase SHA-256 of the exact input bytes.
 - `id` is a positive integer unique within the document.
 - `start_line` and `end_line` are one-based and inclusive.
-- `body` is non-empty Markdown.
+- `body` must contain a non-whitespace Markdown character. Its original indentation
+  and surrounding whitespace are preserved.
 - Unknown fields are rejected when a sidecar is loaded.
 
 Sidecars are saved atomically. A loaded sidecar must have a supported version, valid

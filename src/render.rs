@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
@@ -12,6 +14,7 @@ use crate::{
 };
 
 const EDITOR_HEIGHT: usize = 5;
+const MINIMUM_HEIGHT: u16 = 7;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DocumentRow {
@@ -22,10 +25,12 @@ enum DocumentRow {
 
 pub fn render_app(frame: &mut Frame<'_>, app: &mut App) -> Vec<HitArea> {
     let area = frame.area();
-    if area.height < 3 || area.width < 20 {
+    if area.height < MINIMUM_HEIGHT || area.width < 20 {
         frame.render_widget(
-            Paragraph::new("annotui needs at least 20 columns and 3 rows")
-                .style(Style::default().fg(Color::Red)),
+            Paragraph::new(format!(
+                "annotui needs at least 20 columns and {MINIMUM_HEIGHT} rows"
+            ))
+            .style(Style::default().fg(Color::Red)),
             area,
         );
         return Vec::new();
@@ -132,21 +137,30 @@ fn document_rows(app: &App) -> Vec<DocumentRow> {
     let mut rows = Vec::new();
     let editing_id = app.editor.as_ref().and_then(|editor| editor.comment_id);
     let editor_end = app.editor.as_ref().map(|editor| editor.end_line);
+    let mut comments_by_end = BTreeMap::<usize, Vec<_>>::new();
+    for comment in app
+        .review
+        .comments
+        .iter()
+        .filter(|comment| Some(comment.id) != editing_id)
+    {
+        comments_by_end
+            .entry(comment.end_line)
+            .or_default()
+            .push(comment);
+    }
 
     for line_number in 1..=app.source.line_count() {
         rows.push(DocumentRow::Source(line_number));
-        for comment in app
-            .review
-            .comments
-            .iter()
-            .filter(|comment| comment.end_line == line_number && Some(comment.id) != editing_id)
-        {
-            for (index, body_line) in comment.body.lines().enumerate() {
-                rows.push(DocumentRow::Comment {
-                    id: comment.id,
-                    text: body_line.to_owned(),
-                    first: index == 0,
-                });
+        if let Some(comments) = comments_by_end.get(&line_number) {
+            for comment in comments {
+                for (index, body_line) in comment.body.lines().enumerate() {
+                    rows.push(DocumentRow::Comment {
+                        id: comment.id,
+                        text: body_line.to_owned(),
+                        first: index == 0,
+                    });
+                }
             }
         }
         if editor_end == Some(line_number) {
@@ -316,6 +330,16 @@ mod tests {
         let review = ReviewDocument::empty(source.source_ref());
         let mut app = App::new(source, review);
         let backend = TestBackend::new(15, 2);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| drop(render_app(frame, &mut app)))
+            .unwrap();
+        assert!(terminal.backend().to_string().contains("annotui needs"));
+
+        let source = SourceBuffer::from_bytes("sample", b"one\n").unwrap();
+        let review = ReviewDocument::empty(source.source_ref());
+        let mut app = App::new(source, review);
+        let backend = TestBackend::new(40, MINIMUM_HEIGHT - 1);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|frame| drop(render_app(frame, &mut app)))

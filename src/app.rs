@@ -56,7 +56,7 @@ impl CommentEditor {
     }
 
     pub fn body(&self) -> String {
-        self.textarea.lines().join("\n").trim().to_owned()
+        self.textarea.lines().join("\n")
     }
 }
 
@@ -347,6 +347,19 @@ mod tests {
         assert!(!app.submit_editor());
         assert!(app.editor.is_some());
         assert_eq!(app.status.as_deref(), Some("Comment cannot be empty"));
+    }
+
+    #[test]
+    fn comment_markdown_whitespace_is_preserved() {
+        let mut app = app();
+        app.open_selected_editor();
+        app.editor
+            .as_mut()
+            .unwrap()
+            .textarea
+            .insert_str("  indented code  ");
+        assert!(app.submit_editor());
+        assert_eq!(app.review.comments[0].body, "  indented code  ");
     }
 
     #[test]

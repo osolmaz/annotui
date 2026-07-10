@@ -58,6 +58,7 @@ annotui proposal.md --comments proposal.review.json --format full
 
 The sidecar includes a source hash. annotui refuses to apply it to different content
 instead of silently moving comments to the wrong lines.
+`--comments` and `--output` must name different files.
 
 ## Controls
 

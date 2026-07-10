@@ -41,7 +41,7 @@ pub fn format_comments(source: &SourceBuffer, review: &ReviewDocument) -> String
                 .map(quote_line)
                 .collect::<Vec<_>>()
                 .join("\n");
-            format!("{quote}\n\n{}", comment.body.trim())
+            format!("{quote}\n\n{}", comment.body)
         })
         .collect::<Vec<_>>()
         .join("\n\n")
@@ -66,7 +66,7 @@ pub fn format_full(source: &SourceBuffer, review: &ReviewDocument) -> String {
             .comments
             .iter()
             .filter(|comment| comment.end_line == line_number)
-            .map(|comment| comment.body.trim().to_owned())
+            .map(|comment| comment.body.clone())
             .collect::<Vec<_>>();
         if !comments.is_empty() {
             blocks.push(std::mem::take(&mut quote));
@@ -146,5 +146,19 @@ mod tests {
             format_review(OutputFormat::Full, &source, &review).unwrap(),
             format_full(&source, &review)
         );
+    }
+
+    #[test]
+    fn markdown_output_preserves_comment_indentation() {
+        let source = SourceBuffer::from_bytes("sample", b"alpha\n").unwrap();
+        let mut review = ReviewDocument::empty(source.source_ref());
+        review.upsert_comment(Comment {
+            id: 1,
+            start_line: 1,
+            end_line: 1,
+            body: "    code()  ".into(),
+        });
+        assert_eq!(format_comments(&source, &review), "> alpha\n\n    code()  ");
+        assert_eq!(format_full(&source, &review), "> alpha\n\n    code()  ");
     }
 }
