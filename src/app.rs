@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use ratatui_textarea::{CursorMove, TextArea};
 
 use crate::{
@@ -26,6 +28,12 @@ impl Selection {
         let (start, end) = self.normalized();
         start <= line && line <= end
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BrowseTarget {
+    Source(usize),
+    Comment(u64),
 }
 
 #[derive(Debug)]
@@ -111,6 +119,37 @@ impl App {
         self.follow_cursor = true;
         self.active_comment_id = None;
         self.status = None;
+    }
+
+    pub fn move_browse_focus(&mut self, delta: isize) {
+        if self.selection.is_some() {
+            self.move_cursor(delta);
+            return;
+        }
+
+        let targets = self.browse_targets();
+        let current = self
+            .active_comment_id
+            .filter(|id| self.review.comments.iter().any(|comment| comment.id == *id))
+            .map_or(
+                BrowseTarget::Source(self.cursor_line),
+                BrowseTarget::Comment,
+            );
+        let current_index = targets
+            .iter()
+            .position(|target| *target == current)
+            .unwrap_or_default();
+        let target_index = current_index
+            .saturating_add_signed(delta)
+            .min(targets.len().saturating_sub(1));
+
+        match targets[target_index] {
+            BrowseTarget::Source(line) => self.move_to_line(line),
+            BrowseTarget::Comment(id) => {
+                self.focus_comment(id);
+            }
+        }
+        self.status = self.active_comment_status();
     }
 
     pub fn move_to_line(&mut self, line: usize) {
@@ -213,6 +252,12 @@ impl App {
         id.is_some_and(|id| self.begin_edit(id))
     }
 
+    pub fn open_focused_editor(&mut self) {
+        if !self.active_comment_id.is_some_and(|id| self.begin_edit(id)) {
+            self.open_selected_editor();
+        }
+    }
+
     pub fn submit_editor(&mut self) -> bool {
         let Some(editor) = &self.editor else {
             return false;
@@ -293,15 +338,59 @@ impl App {
                 .rposition(|comment| comment.end_line < self.cursor_line)
                 .unwrap_or(self.review.comments.len() - 1)
         };
-        let comment = &self.review.comments[target_index];
-        self.cursor_line = comment.start_line;
-        self.active_comment_id = Some(comment.id);
+        let id = self.review.comments[target_index].id;
+        self.focus_comment(id);
+        self.status = self.active_comment_status();
+    }
+
+    fn browse_targets(&self) -> Vec<BrowseTarget> {
+        let mut comments_by_end = BTreeMap::<usize, Vec<u64>>::new();
+        for comment in &self.review.comments {
+            comments_by_end
+                .entry(comment.end_line)
+                .or_default()
+                .push(comment.id);
+        }
+
+        let mut targets = Vec::with_capacity(self.source.line_count() + self.review.comments.len());
+        for line in 1..=self.source.line_count() {
+            targets.push(BrowseTarget::Source(line));
+            if let Some(comment_ids) = comments_by_end.get(&line) {
+                targets.extend(comment_ids.iter().copied().map(BrowseTarget::Comment));
+            }
+        }
+        targets
+    }
+
+    fn focus_comment(&mut self, id: u64) -> bool {
+        let Some(end_line) = self
+            .review
+            .comments
+            .iter()
+            .find(|comment| comment.id == id)
+            .map(|comment| comment.end_line)
+        else {
+            return false;
+        };
+        self.cursor_line = end_line;
+        self.active_comment_id = Some(id);
+        self.selection = None;
         self.follow_cursor = true;
-        self.status = Some(format!(
-            "Comment {}/{} · e edit · d delete",
-            target_index + 1,
+        true
+    }
+
+    fn active_comment_status(&self) -> Option<String> {
+        let index = self.active_comment_id.and_then(|id| {
+            self.review
+                .comments
+                .iter()
+                .position(|comment| comment.id == id)
+        })?;
+        Some(format!(
+            "Comment {}/{} · Enter/e edit · d delete",
+            index + 1,
             self.review.comments.len()
-        ));
+        ))
     }
 
     fn comment_id_at_cursor(&self) -> Option<u64> {
@@ -532,5 +621,59 @@ mod tests {
         app.cursor_line = 1;
         assert!(app.edit_comment_at_cursor());
         assert_eq!(app.editor.as_ref().unwrap().comment_id, Some(1));
+    }
+
+    #[test]
+    fn vertical_focus_visits_inline_comments_in_document_order() {
+        let mut app = app();
+        for id in [1, 2] {
+            app.review.upsert_comment(Comment {
+                id,
+                start_line: 1,
+                end_line: 2,
+                body: format!("comment {id}"),
+            });
+        }
+
+        app.move_browse_focus(1);
+        assert_eq!((app.cursor_line, app.active_comment_id), (2, None));
+        app.move_browse_focus(1);
+        assert_eq!((app.cursor_line, app.active_comment_id), (2, Some(1)));
+        assert_eq!(
+            app.status.as_deref(),
+            Some("Comment 1/2 · Enter/e edit · d delete")
+        );
+        app.move_browse_focus(1);
+        assert_eq!(app.active_comment_id, Some(2));
+        app.move_browse_focus(1);
+        assert_eq!((app.cursor_line, app.active_comment_id), (3, None));
+
+        app.move_browse_focus(-1);
+        assert_eq!(app.active_comment_id, Some(2));
+        app.move_browse_focus(-1);
+        assert_eq!(app.active_comment_id, Some(1));
+        app.move_browse_focus(-1);
+        assert_eq!((app.cursor_line, app.active_comment_id), (2, None));
+    }
+
+    #[test]
+    fn moving_from_a_single_focused_comment_reaches_the_next_source_line() {
+        let mut app = app();
+        app.review.upsert_comment(Comment {
+            id: 1,
+            start_line: 1,
+            end_line: 1,
+            body: "comment".into(),
+        });
+
+        app.move_browse_focus(1);
+        assert_eq!(app.active_comment_id, Some(1));
+        assert_eq!(
+            app.status.as_deref(),
+            Some("Comment 1/1 · Enter/e edit · d delete")
+        );
+        app.move_browse_focus(1);
+        assert_eq!((app.cursor_line, app.active_comment_id), (2, None));
+        assert!(app.status.is_none());
     }
 }

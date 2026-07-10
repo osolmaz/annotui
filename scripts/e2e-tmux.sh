@@ -101,6 +101,23 @@ assert review["comments"] == [
 ]
 PY
 
+start_tui "$tmpdir/keyboard-edit-output.md" "--comments '$tmpdir/review.json' --no-mouse"
+
+# Walk from source line 1 to source line 2 and then to its inline comment.
+# Open, change, and save that comment without mouse input.
+tmux send-keys -t "$session" Down Down
+wait_for_pane "▶─ human comment here ..."
+tmux send-keys -t "$session" Enter
+wait_for_pane "Comment on lines 1"
+tmux send-keys -t "$session" -l " edited"
+tmux send-keys -t "$session" Enter
+wait_for_pane "Comment saved"
+wait_for_pane "▶─ human comment here ... edited"
+finish_tui
+
+printf '> quoted part line 1\n> quoted part line 2\n\nhuman comment here ... edited\n' >"$tmpdir/expected-keyboard-edit.md"
+diff -u "$tmpdir/expected-keyboard-edit.md" "$tmpdir/keyboard-edit-output.md"
+
 start_tui "$tmpdir/shift-output.md" "--comments '$tmpdir/shift-review.json' --no-mouse"
 
 # Select all three source lines with Shift-Down, then inject a left-Shift release
