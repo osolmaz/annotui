@@ -639,6 +639,10 @@ mod tests {
         assert_eq!((app.cursor_line, app.active_comment_id), (2, None));
         app.move_browse_focus(1);
         assert_eq!((app.cursor_line, app.active_comment_id), (2, Some(1)));
+        assert_eq!(
+            app.status.as_deref(),
+            Some("Comment 1/2 · Enter/e edit · d delete")
+        );
         app.move_browse_focus(1);
         assert_eq!(app.active_comment_id, Some(2));
         app.move_browse_focus(1);
@@ -650,5 +654,26 @@ mod tests {
         assert_eq!(app.active_comment_id, Some(1));
         app.move_browse_focus(-1);
         assert_eq!((app.cursor_line, app.active_comment_id), (2, None));
+    }
+
+    #[test]
+    fn moving_from_a_single_focused_comment_reaches_the_next_source_line() {
+        let mut app = app();
+        app.review.upsert_comment(Comment {
+            id: 1,
+            start_line: 1,
+            end_line: 1,
+            body: "comment".into(),
+        });
+
+        app.move_browse_focus(1);
+        assert_eq!(app.active_comment_id, Some(1));
+        assert_eq!(
+            app.status.as_deref(),
+            Some("Comment 1/1 · Enter/e edit · d delete")
+        );
+        app.move_browse_focus(1);
+        assert_eq!((app.cursor_line, app.active_comment_id), (2, None));
+        assert!(app.status.is_none());
     }
 }
