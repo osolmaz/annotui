@@ -25,6 +25,7 @@ same-file = "1"
 tempfile = "3"
 thiserror = "2"
 unicode-segmentation = "1"
+unicode-normalization = "0.1"
 unicode-width = "0.2"
 
 [dev-dependencies]

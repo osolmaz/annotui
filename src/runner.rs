@@ -10,6 +10,7 @@ use crossterm::event::{
     MouseEventKind,
 };
 use ratatui_textarea::Scrolling;
+use unicode_normalization::UnicodeNormalization;
 
 use crate::{
     app::App,
@@ -119,7 +120,10 @@ fn paths_alias(left: &Path, right: &Path) -> anyhow::Result<bool> {
         return same_file::is_same_file(left, right)
             .with_context(|| format!("compare {} and {}", left.display(), right.display()));
     }
-    if paths_differ_only_by_case(&resolved_left, &resolved_right)
+    if paths_normalize_equally(&resolved_left, &resolved_right) {
+        return Ok(true);
+    }
+    if paths_case_fold_equally(&resolved_left, &resolved_right)
         && nearest_existing_ancestor(&resolved_left)
             .or_else(|| nearest_existing_ancestor(&resolved_right))
             .is_some_and(filesystem_is_case_insensitive)
@@ -129,10 +133,24 @@ fn paths_alias(left: &Path, right: &Path) -> anyhow::Result<bool> {
     Ok(false)
 }
 
-fn paths_differ_only_by_case(left: &Path, right: &Path) -> bool {
+fn paths_normalize_equally(left: &Path, right: &Path) -> bool {
     left.to_str()
         .zip(right.to_str())
-        .is_some_and(|(left, right)| left.to_lowercase() == right.to_lowercase())
+        .is_some_and(|(left, right)| {
+            left != right && normalize_path_text(left) == normalize_path_text(right)
+        })
+}
+
+fn paths_case_fold_equally(left: &Path, right: &Path) -> bool {
+    left.to_str()
+        .zip(right.to_str())
+        .is_some_and(|(left, right)| {
+            normalize_path_text(left).to_lowercase() == normalize_path_text(right).to_lowercase()
+        })
+}
+
+fn normalize_path_text(path: &str) -> String {
+    path.nfc().collect()
 }
 
 fn nearest_existing_ancestor(path: &Path) -> Option<&Path> {
@@ -181,7 +199,10 @@ fn read_review(cli: &Cli, source: &SourceBuffer) -> anyhow::Result<ReviewDocumen
     let Some(path) = &cli.comments else {
         return Ok(ReviewDocument::empty(source.source_ref()));
     };
-    if !path.exists() {
+    if !path
+        .try_exists()
+        .with_context(|| format!("inspect comments file {}", path.display()))?
+    {
         return Ok(ReviewDocument::empty(source.source_ref()));
     }
     let mut review = load_review(path)?;
@@ -597,18 +618,48 @@ mod tests {
     }
 
     #[test]
-    fn recognizes_case_only_path_differences() {
-        assert!(paths_differ_only_by_case(
+    fn recognizes_case_and_normalization_equivalent_paths() {
+        assert!(paths_case_fold_equally(
             Path::new("/tmp/review.json"),
             Path::new("/TMP/REVIEW.JSON")
         ));
-        assert!(!paths_differ_only_by_case(
+        assert!(!paths_case_fold_equally(
             Path::new("/tmp/review.json"),
             Path::new("/tmp/output.json")
+        ));
+        assert!(paths_normalize_equally(
+            Path::new("/tmp/é.json"),
+            Path::new("/tmp/e\u{301}.json")
         ));
         assert_eq!(
             toggle_first_ascii_letter("review.json").as_deref(),
             Some("Review.json")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sidecar_metadata_errors_are_reported_before_review() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempdir().unwrap();
+        let first = directory.path().join("first");
+        let second = directory.path().join("second");
+        symlink(&second, &first).unwrap();
+        symlink(&first, &second).unwrap();
+        let cli = Cli::try_parse_from([
+            "annotui".into(),
+            "--buffer".into(),
+            "hello".into(),
+            "--comments".into(),
+            first.into_os_string(),
+        ])
+        .unwrap();
+        let source = read_source(&cli).unwrap();
+
+        assert!(read_review(&cli, &source)
+            .unwrap_err()
+            .to_string()
+            .contains("inspect comments file"));
     }
 }
