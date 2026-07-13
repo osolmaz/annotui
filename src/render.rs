@@ -608,6 +608,38 @@ mod tests {
     }
 
     #[test]
+    fn annotation_editor_word_wraps_to_its_inner_width() {
+        let source = SourceBuffer::from_bytes("sample", b"one\n").unwrap();
+        let review = ReviewDocument::empty(source.source_ref());
+        let mut app = App::new(source, review);
+        app.open_selected_editor();
+        app.editor
+            .as_mut()
+            .unwrap()
+            .textarea
+            .insert_str("alpha beta gamma delta epsilon");
+        let backend = TestBackend::new(20, 9);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| drop(render_app(frame, &mut app)))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let editor_rows = (2..7)
+            .map(|row| {
+                (1..19)
+                    .map(|column| buffer[(column, row)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+        assert!(editor_rows
+            .iter()
+            .any(|row| row.contains("alpha beta gamma")));
+        assert!(editor_rows.iter().any(|row| row.contains("delta epsilon")));
+    }
+
+    #[test]
     fn following_cursor_scrolls_long_documents() {
         let text = (1..=30)
             .map(|line| format!("line {line}"))
