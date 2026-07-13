@@ -84,6 +84,7 @@ Keyboard controls:
 | `Shift-Up` / `Shift-Down` | Select a range; release Shift to write the comment |
 | `v` | Start or cancel range selection |
 | `Enter` | Comment on a source range, edit a focused comment, or save the editor |
+| `Shift-Enter` / `Alt-Enter` | Insert a newline in a comment |
 | `Ctrl-O` | Insert a newline in a comment |
 | `Esc` | Cancel selection or editing |
 | `e` / `d` | Edit or delete a focused comment or one on the cursor line |

@@ -47,11 +47,7 @@ impl TerminalGuard {
         PASTE_ENABLED.store(true, Ordering::SeqCst);
         execute!(
             tty,
-            PushKeyboardEnhancementFlags(
-                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-                    | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
-            )
+            PushKeyboardEnhancementFlags(keyboard_enhancement_flags())
         )?;
         KEYBOARD_ENHANCED.store(true, Ordering::SeqCst);
         if mouse_enabled {
@@ -61,6 +57,13 @@ impl TerminalGuard {
         let terminal = Terminal::new(CrosstermBackend::new(tty))?;
         Ok((guard, terminal))
     }
+}
+
+fn keyboard_enhancement_flags() -> KeyboardEnhancementFlags {
+    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+        | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+        | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+        | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
 }
 
 impl Drop for TerminalGuard {
@@ -107,5 +110,17 @@ fn restore_terminal() {
     }
     if RAW_ENABLED.swap(false, Ordering::SeqCst) {
         let _ = disable_raw_mode();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enhanced_input_requests_shifted_characters() {
+        assert!(
+            keyboard_enhancement_flags().contains(KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS)
+        );
     }
 }

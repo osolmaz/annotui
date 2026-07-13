@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use ratatui_textarea::{CursorMove, TextArea};
+use ratatui_textarea::{CursorMove, TextArea, WrapMode};
 
 use crate::{
     domain::{Comment, ReviewDocument},
@@ -53,6 +53,7 @@ impl CommentEditor {
         };
         textarea.set_placeholder_text("Write a comment…");
         textarea.set_cursor_line_style(ratatui::style::Style::default());
+        textarea.set_wrap_mode(WrapMode::WordOrGlyph);
         textarea.move_cursor(CursorMove::Bottom);
         textarea.move_cursor(CursorMove::End);
         Self {
@@ -485,6 +486,17 @@ mod tests {
         assert!(!app.submit_editor());
         assert!(app.editor.is_some());
         assert_eq!(app.status.as_deref(), Some("Comment cannot be empty"));
+    }
+
+    #[test]
+    fn comment_editor_wraps_words_and_long_tokens() {
+        let mut app = app();
+        app.open_selected_editor();
+
+        assert_eq!(
+            app.editor.as_ref().unwrap().textarea.wrap_mode(),
+            WrapMode::WordOrGlyph
+        );
     }
 
     #[test]

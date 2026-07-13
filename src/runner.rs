@@ -449,6 +449,21 @@ mod tests {
     }
 
     #[test]
+    fn shift_enter_inserts_an_annotation_newline_without_submitting() {
+        let mut app = app();
+        app.open_selected_editor();
+        handle_key(
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
+            &mut app,
+        );
+
+        handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT), &mut app);
+
+        assert_eq!(app.editor.as_ref().unwrap().body(), "a\n");
+        assert!(app.review.comments.is_empty());
+    }
+
+    #[test]
     fn shift_arrows_open_the_selected_range_when_shift_is_released() {
         let mut app = app();
         handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT), &mut app);
