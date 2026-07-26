@@ -16,14 +16,14 @@ stable data and were intentionally excluded.
 Commands:
 
 ```sh
-npx -y @dutifuldev/schemator run \
+npx -y @osolmaz/schemator run \
   --source annotui-schema.md \
   --context annotui-schema-context.md \
   --out annotui-schemator
-npx -y @dutifuldev/schemator report \
+npx -y @osolmaz/schemator report \
   --run annotui-schemator \
   --out annotui-schemator/final-report.md
-npx -y @dutifuldev/schemator diff \
+npx -y @osolmaz/schemator diff \
   --run annotui-schemator \
   --out annotui-schemator/graph-diff.md
 ```
