@@ -1,6 +1,6 @@
 [package]
 name = "annotui"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.88"
 description = "Mouse-first terminal UI for commenting on files and piped text."
