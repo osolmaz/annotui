@@ -26,6 +26,7 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           INPUT_TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           tag="${RELEASE_TAG:-${INPUT_TAG:-}}"
@@ -34,7 +35,7 @@ jobs:
             exit 1
           fi
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            release_state="$(gh release view "$tag" --json isDraft,publishedAt \
+            release_state="$(gh release view "$tag" --repo "$REPO" --json isDraft,publishedAt \
               --jq 'if .isDraft == false and .publishedAt != null then "published" else "unpublished" end')"
             if [ "$release_state" != "published" ]; then
               echo "release tag '$tag' is not a published GitHub Release" >&2
