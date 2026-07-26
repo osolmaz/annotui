@@ -303,6 +303,18 @@ fn handle_editor_key(key: KeyEvent, app: &mut App) {
         (KeyCode::Enter, _) => {
             app.submit_editor();
         }
+        // Readline expectation: Ctrl+U kills to line start. The widget's
+        // default binds it to undo, which moves to the GUI chord instead.
+        (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
+            if let Some(editor) = app.editor.as_mut() {
+                editor.textarea.delete_line_by_head();
+            }
+        }
+        (KeyCode::Char('z'), KeyModifiers::CONTROL) => {
+            if let Some(editor) = app.editor.as_mut() {
+                editor.textarea.undo();
+            }
+        }
         _ => {
             if let Some(editor) = app.editor.as_mut() {
                 editor.textarea.input(key);
@@ -819,5 +831,133 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("inspect comments file"));
+    }
+
+    fn editing_app(initial: &str) -> App {
+        let mut app = app();
+        handle_key(
+            KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE),
+            &mut app,
+        );
+        handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &mut app);
+        app.editor
+            .as_mut()
+            .expect("editor open")
+            .textarea
+            .insert_str(initial);
+        app
+    }
+
+    fn editor_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+        handle_key(KeyEvent::new(code, modifiers), app);
+    }
+
+    fn editor_body(app: &App) -> String {
+        app.editor.as_ref().expect("editor open").body()
+    }
+
+    fn editor_cursor(app: &App) -> (usize, usize) {
+        let cursor = app.editor.as_ref().expect("editor open").textarea.cursor();
+        (cursor.0, cursor.1)
+    }
+
+    #[test]
+    fn readline_line_bounds_and_char_motion() {
+        let mut app = editing_app("hello world");
+        editor_key(&mut app, KeyCode::Char('a'), KeyModifiers::CONTROL);
+        assert_eq!(editor_cursor(&app), (0, 0));
+        editor_key(&mut app, KeyCode::Char('f'), KeyModifiers::CONTROL);
+        assert_eq!(editor_cursor(&app), (0, 1));
+        editor_key(&mut app, KeyCode::Char('b'), KeyModifiers::CONTROL);
+        assert_eq!(editor_cursor(&app), (0, 0));
+        editor_key(&mut app, KeyCode::Char('e'), KeyModifiers::CONTROL);
+        assert_eq!(editor_cursor(&app), (0, 11));
+    }
+
+    #[test]
+    fn readline_line_motion_matches_arrows() {
+        let mut app = editing_app("one");
+        editor_key(&mut app, KeyCode::Char('o'), KeyModifiers::CONTROL);
+        app.editor
+            .as_mut()
+            .expect("editor open")
+            .textarea
+            .insert_str("two");
+        editor_key(&mut app, KeyCode::Char('p'), KeyModifiers::CONTROL);
+        assert_eq!(editor_cursor(&app).0, 0);
+        editor_key(&mut app, KeyCode::Char('n'), KeyModifiers::CONTROL);
+        assert_eq!(editor_cursor(&app).0, 1);
+    }
+
+    #[test]
+    fn readline_word_motion() {
+        let mut app = editing_app("alpha beta gamma");
+        editor_key(&mut app, KeyCode::Char('a'), KeyModifiers::CONTROL);
+        editor_key(&mut app, KeyCode::Char('f'), KeyModifiers::ALT);
+        let after_first = editor_cursor(&app).1;
+        assert!(after_first >= 5, "alt-f crosses the first word");
+        editor_key(&mut app, KeyCode::Char('b'), KeyModifiers::ALT);
+        assert_eq!(editor_cursor(&app), (0, 0));
+    }
+
+    #[test]
+    fn readline_word_deletion() {
+        let mut app = editing_app("alpha beta");
+        editor_key(&mut app, KeyCode::Char('w'), KeyModifiers::CONTROL);
+        assert_eq!(editor_body(&app), "alpha ");
+        let mut app = editing_app("alpha beta");
+        editor_key(&mut app, KeyCode::Backspace, KeyModifiers::ALT);
+        assert_eq!(editor_body(&app), "alpha ");
+        let mut app = editing_app("alpha beta");
+        editor_key(&mut app, KeyCode::Char('a'), KeyModifiers::CONTROL);
+        editor_key(&mut app, KeyCode::Char('d'), KeyModifiers::ALT);
+        assert_eq!(editor_body(&app), " beta");
+    }
+
+    #[test]
+    fn readline_kill_to_end_and_yank() {
+        let mut app = editing_app("keep killme");
+        for _ in 0..6 {
+            editor_key(&mut app, KeyCode::Char('b'), KeyModifiers::CONTROL);
+        }
+        editor_key(&mut app, KeyCode::Char('k'), KeyModifiers::CONTROL);
+        assert_eq!(editor_body(&app), "keep ");
+        editor_key(&mut app, KeyCode::Char('y'), KeyModifiers::CONTROL);
+        assert_eq!(editor_body(&app), "keep killme");
+    }
+
+    #[test]
+    fn ctrl_u_kills_to_line_start_not_undo() {
+        let mut app = editing_app("prefix suffix");
+        for _ in 0..7 {
+            editor_key(&mut app, KeyCode::Char('b'), KeyModifiers::CONTROL);
+        }
+        editor_key(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        assert_eq!(editor_body(&app), " suffix");
+    }
+
+    #[test]
+    fn ctrl_z_undoes_in_the_editor() {
+        let mut app = editing_app("typed");
+        editor_key(&mut app, KeyCode::Char('a'), KeyModifiers::CONTROL);
+        editor_key(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        assert_eq!(editor_body(&app), "typed", "kill at line start is a no-op");
+        editor_key(&mut app, KeyCode::Char('e'), KeyModifiers::CONTROL);
+        editor_key(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        assert_eq!(
+            editor_body(&app),
+            "",
+            "kill at line end takes the whole line"
+        );
+        editor_key(&mut app, KeyCode::Char('z'), KeyModifiers::CONTROL);
+        assert_eq!(editor_body(&app), "typed", "ctrl-z restores the kill");
+    }
+
+    #[test]
+    fn ctrl_d_deletes_the_char_under_the_cursor() {
+        let mut app = editing_app("abc");
+        editor_key(&mut app, KeyCode::Char('a'), KeyModifiers::CONTROL);
+        editor_key(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
+        assert_eq!(editor_body(&app), "bc");
     }
 }

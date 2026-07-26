@@ -86,6 +86,7 @@ Keyboard controls:
 | `Enter` | Comment on a source range, edit a focused comment, or save the editor |
 | `Shift-Enter` / `Alt-Enter` | Insert a newline in a comment |
 | `Ctrl-O` | Insert a newline in a comment |
+| readline chords | `Ctrl-A`/`Ctrl-E` line bounds, `Ctrl-F`/`Ctrl-B`/`Ctrl-P`/`Ctrl-N` motion, `Alt-F`/`Alt-B` word motion, `Ctrl-W`/`Alt-Backspace`/`Alt-D` word deletion, `Ctrl-K`/`Ctrl-U` kill to end/start, `Ctrl-Y` yank, `Ctrl-D` delete, `Ctrl-Z` undo |
 | `Esc` | Cancel selection or editing |
 | `e` / `d` | Edit or delete a focused comment or one on the cursor line |
 | `[` / `]` | Jump to the previous/next comment |
