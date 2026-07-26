@@ -309,7 +309,11 @@ fn handle_editor_key(key: KeyEvent, app: &mut App) {
         // merges a line into its predecessor.
         (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
             if let Some(editor) = app.editor.as_mut() {
-                if editor.textarea.is_selecting() || editor.textarea.cursor().1 > 0 {
+                let has_selection = editor
+                    .textarea
+                    .selection_range()
+                    .is_some_and(|(start, end)| start != end);
+                if has_selection || editor.textarea.cursor().1 > 0 {
                     editor.textarea.delete_line_by_head();
                 }
             }
@@ -976,6 +980,28 @@ mod tests {
             editor_body(&app),
             "first\n",
             "an active selection is killed even when the cursor sits at column zero"
+        );
+    }
+
+    #[test]
+    fn ctrl_u_ignores_an_empty_selection_at_column_zero() {
+        let mut app = editing_app("first");
+        editor_key(&mut app, KeyCode::Char('o'), KeyModifiers::CONTROL);
+        app.editor
+            .as_mut()
+            .expect("editor open")
+            .textarea
+            .insert_str("second");
+        {
+            let textarea = &mut app.editor.as_mut().expect("editor open").textarea;
+            textarea.move_cursor(ratatui_textarea::CursorMove::Head);
+            textarea.start_selection();
+        }
+        editor_key(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        assert_eq!(
+            editor_body(&app),
+            "first\nsecond",
+            "a zero-width selection must not let ctrl-u merge lines"
         );
     }
 
