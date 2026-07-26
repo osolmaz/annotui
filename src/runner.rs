@@ -309,7 +309,7 @@ fn handle_editor_key(key: KeyEvent, app: &mut App) {
         // merges a line into its predecessor.
         (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
             if let Some(editor) = app.editor.as_mut() {
-                if editor.textarea.cursor().1 > 0 {
+                if editor.textarea.is_selecting() || editor.textarea.cursor().1 > 0 {
                     editor.textarea.delete_line_by_head();
                 }
             }
@@ -955,6 +955,28 @@ mod tests {
         );
         editor_key(&mut app, KeyCode::Char('z'), KeyModifiers::CONTROL);
         assert_eq!(editor_body(&app), "typed", "ctrl-z restores the kill");
+    }
+
+    #[test]
+    fn ctrl_u_still_deletes_a_selection_ending_at_column_zero() {
+        let mut app = editing_app("first");
+        editor_key(&mut app, KeyCode::Char('o'), KeyModifiers::CONTROL);
+        app.editor
+            .as_mut()
+            .expect("editor open")
+            .textarea
+            .insert_str("second");
+        {
+            let textarea = &mut app.editor.as_mut().expect("editor open").textarea;
+            textarea.start_selection();
+            textarea.move_cursor(ratatui_textarea::CursorMove::Head);
+        }
+        editor_key(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        assert_eq!(
+            editor_body(&app),
+            "first\n",
+            "an active selection is killed even when the cursor sits at column zero"
+        );
     }
 
     #[test]
