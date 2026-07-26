@@ -305,9 +305,13 @@ fn handle_editor_key(key: KeyEvent, app: &mut App) {
         }
         // Readline expectation: Ctrl+U kills to line start. The widget's
         // default binds it to undo, which moves to the GUI chord instead.
+        // At column zero there is nothing to kill; guard so the chord never
+        // merges a line into its predecessor.
         (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
             if let Some(editor) = app.editor.as_mut() {
-                editor.textarea.delete_line_by_head();
+                if editor.textarea.cursor().1 > 0 {
+                    editor.textarea.delete_line_by_head();
+                }
             }
         }
         (KeyCode::Char('z'), KeyModifiers::CONTROL) => {
@@ -951,6 +955,24 @@ mod tests {
         );
         editor_key(&mut app, KeyCode::Char('z'), KeyModifiers::CONTROL);
         assert_eq!(editor_body(&app), "typed", "ctrl-z restores the kill");
+    }
+
+    #[test]
+    fn ctrl_u_never_merges_lines() {
+        let mut app = editing_app("first");
+        editor_key(&mut app, KeyCode::Char('o'), KeyModifiers::CONTROL);
+        app.editor
+            .as_mut()
+            .expect("editor open")
+            .textarea
+            .insert_str("second");
+        editor_key(&mut app, KeyCode::Char('a'), KeyModifiers::CONTROL);
+        editor_key(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        assert_eq!(
+            editor_body(&app),
+            "first\nsecond",
+            "ctrl-u at column zero must not delete the newline"
+        );
     }
 
     #[test]
